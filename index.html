@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Kiro</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; }
+    #gameCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    // ─── Scaled Constants ────────────────────────────────────────────────────
+    function getScaledConstants(canvas) {
+      const scale = canvas.height / 600; // 600px is the reference height
+      return {
+        gravity: 0.5 * scale,
+        flapVelocity: -9 * scale,
+        scrollSpeed: 3 * scale,
+        gapSize: 160 * scale,
+        pipeWidth: 60 * scale,
+        ghostyWidth: 48 * scale,
+        ghostyHeight: 48 * scale,
+        scoreBarHeight: 48 * scale,
+      };
+    }
+
+    // ─── Physics Engine ──────────────────────────────────────────────────────
+    const PhysicsEngine = {
+      GRAVITY: 0.5,
+      FLAP_VELOCITY: -9,
+      applyGravity(ghosty) {
+        ghosty.vy += this.GRAVITY;
+        ghosty.y += ghosty.vy;
+      },
+      applyFlap(ghosty) {
+        ghosty.vy = this.FLAP_VELOCITY;
+      },
+      clampToBounds(ghosty, canvasHeight, scoreBarHeight) {
+        if (ghosty.y <= 0) {
+          ghosty.y = 0;
+          ghosty.vy = 0;
+          return { gameOver: false };
+        }
+        if (ghosty.y >= canvasHeight - scoreBarHeight) {
+          return { gameOver: true };
+        }
+        return { gameOver: false };
+      },
+    };
+
+    // ─── Obstacle Manager ────────────────────────────────────────────────────
+    const ObstacleManager = {
+      PIPE_INTERVAL: 220,
+      SCROLL_SPEED: 3,
+      GAP_SIZE: 160,
+      pipes: [],
+      clouds: [],
+
+      spawnPipe(gameState) {
+        const { canvas, scoreBarHeight } = gameState;
+        const { gapSize, pipeWidth, scrollSpeed } = getScaledConstants(canvas);
+        const minMargin = 60 * (canvas.height / 600);
+        const maxGapTop = canvas.height - scoreBarHeight - gapSize - minMargin;
+        const gapTop = minMargin + Math.random() * (maxGapTop - minMargin);
+        const gapBottom = gapTop + gapSize;
+        const pipe = {
+          x: canvas.width + pipeWidth,
+          gapTop,
+          gapBottom,
+          width: pipeWidth,
+          scored: false,
+        };
+        this.pipes.push(pipe);
+        return pipe;
+      },
+
+      spawnCloud(gameState) {
+        const { canvas, scoreBarHeight } = gameState;
+        const scale = canvas.height / 600;
+        const cloudWidth = 80 * scale;
+        const cloudHeight = 30 * scale;
+        const minY = 20;
+        const maxY = canvas.height - scoreBarHeight - 40 - cloudHeight;
+        const y = minY + Math.random() * (maxY - minY);
+        const cloud = {
+          x: canvas.width,
+          y,
+          width: cloudWidth,
+          height: cloudHeight,
+        };
+        this.clouds.push(cloud);
+        return cloud;
+      },
+
+      update(gameState) {
+        const { canvas, scoreBarHeight } = gameState;
+        const { scrollSpeed, pipeWidth } = getScaledConstants(canvas);
+
+        // Move all pipes and clouds leftward
+        for (const pipe of this.pipes) pipe.x -= scrollSpeed;
+        for (const cloud of this.clouds) cloud.x -= scrollSpeed;
+
+        // Remove off-screen obstacles
+        this.pipes = this.pipes.filter(p => p.x + p.width > 0);
+        this.clouds = this.clouds.filter(c => c.x + c.width > 0);
+
+        // Spawn new pipe when it's time
+        const pipeInterval = this.PIPE_INTERVAL * (canvas.height / 600);
+        if (gameState.nextPipeX !== undefined) {
+          if (canvas.width >= gameState.nextPipeX) {
+            // use nextPipeX tracking
+          }
+        }
+        // Spawn based on last pipe position
+        const lastPipe = this.pipes[this.pipes.length - 1];
+        if (!lastPipe || lastPipe.x <= canvas.width - pipeInterval) {
+          this.spawnPipe(gameState);
+          // Occasionally spawn a cloud
+          if (Math.random() < 0.4) this.spawnCloud(gameState);
+        }
+      },
+
+      reset() {
+        this.pipes = [];
+        this.clouds = [];
+      },
+    };
+
+    // ─── Score Manager ───────────────────────────────────────────────────────
+    const ScoreManager = {
+      score: 0,
+      highScore: 0,
+      loadHighScore() {
+        try {
+          this.highScore = parseInt(localStorage.getItem('flappyKiroHighScore')) || 0;
+        } catch {
+          this.highScore = 0;
+        }
+      },
+      saveHighScore() {
+        try {
+          localStorage.setItem('flappyKiroHighScore', this.highScore);
+        } catch { /* in-memory only */ }
+      },
+      checkPipeCrossing(ghosty, pipes) {
+        for (const pipe of pipes) {
+          if (!pipe.scored && ghosty.x > pipe.x + pipe.width) {
+            pipe.scored = true;
+            this.incrementScore();
+          }
+        }
+      },
+      incrementScore() {
+        this.score++;
+        if (this.score > this.highScore) {
+          this.highScore = this.score;
+          this.saveHighScore();
+        }
+      },
+      reset() {
+        this.score = 0;
+      },
+    };
+
+    // ─── Input Handler ───────────────────────────────────────────────────────
+    const InputHandler = {
+      pendingFlap: false,
+      bind(canvas) {
+        window.addEventListener('keydown', (e) => {
+          if (e.code === 'Space' || e.key === ' ') this.pendingFlap = true;
+        });
+        canvas.addEventListener('click', () => { this.pendingFlap = true; });
+        canvas.addEventListener('touchstart', () => { this.pendingFlap = true; });
+      },
+      consumeFlap() {
+        if (this.pendingFlap) {
+          this.pendingFlap = false;
+          return true;
+        }
+        return false;
+      },
+    };
+
+    // ─── Audio Manager ───────────────────────────────────────────────────────
+    const AudioManager = {
+      jumpSound: new Audio('assets/jump.wav'),
+      gameOverSound: new Audio('assets/game_over.wav'),
+      unlocked: false,
+      unlock() {
+        this.unlocked = true;
+      },
+      playJump() {
+        if (!this.unlocked) return;
+        try {
+          this.jumpSound.currentTime = 0;
+          this.jumpSound.play();
+        } catch(e) { /* silent */ }
+      },
+      playGameOver() {
+        if (!this.unlocked) return;
+        try {
+          this.gameOverSound.currentTime = 0;
+          this.gameOverSound.play();
+        } catch(e) { /* silent */ }
+      },
+    };
+
+    // ─── Renderer ────────────────────────────────────────────────────────────
+    const Renderer = {
+      ctx: null,
+      ghostyImg: new Image(),
+      ghostyImgFailed: false,
+
+      drawBackground(canvas) {
+        const ctx = this.ctx;
+        ctx.fillStyle = '#87CEEB';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Sketchy texture lines
+        ctx.strokeStyle = '#6ab4d8';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 20; i++) {
+          const x = Math.floor((canvas.width / 20) * i + 10);
+          const y = Math.floor(30 + (canvas.height / 20) * (i % 7));
+          const len = 20 + (i * 13) % 40;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + len, y + 2);
+          ctx.stroke();
+        }
+      },
+
+      drawGhosty(ghosty) {
+        const ctx = this.ctx;
+        if (!this.ghostyImgFailed && this.ghostyImg.complete && this.ghostyImg.naturalWidth > 0) {
+          ctx.drawImage(
+            this.ghostyImg,
+            ghosty.x - ghosty.width / 2,
+            ghosty.y - ghosty.height / 2,
+            ghosty.width,
+            ghosty.height
+          );
+        } else {
+          // Fallback: white circle with eyes
+          const r = ghosty.width / 2;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(ghosty.x, ghosty.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          // Eyes
+          ctx.fillStyle = '#222222';
+          ctx.beginPath();
+          ctx.arc(ghosty.x - r * 0.3, ghosty.y - r * 0.1, r * 0.15, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(ghosty.x + r * 0.3, ghosty.y - r * 0.1, r * 0.15, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      },
+
+      drawPipes(pipes, canvas, scoreBarHeight) {
+        const ctx = this.ctx;
+        for (const pipe of pipes) {
+          // Top pipe
+          ctx.fillStyle = '#4CAF50';
+          ctx.fillRect(pipe.x, 0, pipe.width, pipe.gapTop);
+          ctx.strokeStyle = '#388E3C';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(pipe.x, 0, pipe.width, pipe.gapTop);
+          // Bottom pipe
+          const bottomY = pipe.gapBottom;
+          const bottomH = canvas.height - scoreBarHeight - bottomY;
+          ctx.fillStyle = '#4CAF50';
+          ctx.fillRect(pipe.x, bottomY, pipe.width, bottomH);
+          ctx.strokeStyle = '#388E3C';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(pipe.x, bottomY, pipe.width, bottomH);
+        }
+      },
+
+      drawClouds(clouds) {
+        const ctx = this.ctx;
+        for (const cloud of clouds) {
+          const r = cloud.height / 2;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(cloud.x, cloud.y, cloud.width, cloud.height, r);
+          } else {
+            // Manual rounded rect
+            ctx.moveTo(cloud.x + r, cloud.y);
+            ctx.lineTo(cloud.x + cloud.width - r, cloud.y);
+            ctx.arc(cloud.x + cloud.width - r, cloud.y + r, r, -Math.PI / 2, 0);
+            ctx.lineTo(cloud.x + cloud.width, cloud.y + cloud.height - r);
+            ctx.arc(cloud.x + cloud.width - r, cloud.y + cloud.height - r, r, 0, Math.PI / 2);
+            ctx.lineTo(cloud.x + r, cloud.y + cloud.height);
+            ctx.arc(cloud.x + r, cloud.y + cloud.height - r, r, Math.PI / 2, Math.PI);
+            ctx.lineTo(cloud.x, cloud.y + r);
+            ctx.arc(cloud.x + r, cloud.y + r, r, Math.PI, -Math.PI / 2);
+            ctx.closePath();
+          }
+          ctx.fill();
+          ctx.strokeStyle = '#cccccc';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      },
+
+      drawScoreBar(canvas, score, highScore) {
+        const ctx = this.ctx;
+        const scoreBarHeight = getScaledConstants(canvas).scoreBarHeight;
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, canvas.height - scoreBarHeight, canvas.width, scoreBarHeight);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          `Score: ${score} | High: ${highScore}`,
+          canvas.width / 2,
+          canvas.height - scoreBarHeight / 2
+        );
+      },
+
+      drawIdleScreen(canvas) {
+        const ctx = this.ctx;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 48px monospace';
+        ctx.fillText('Flappy Kiro', canvas.width / 2, canvas.height / 2 - 40);
+        ctx.font = '24px monospace';
+        ctx.fillText('Tap / Click / Space to Start', canvas.width / 2, canvas.height / 2 + 20);
+      },
+
+      drawGameOverScreen(canvas, score) {
+        const ctx = this.ctx;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 56px monospace';
+        ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 60);
+        ctx.font = '28px monospace';
+        ctx.fillText(`Score: ${score}`, canvas.width / 2, canvas.height / 2 + 10);
+        ctx.font = '22px monospace';
+        ctx.fillText('Tap to Restart', canvas.width / 2, canvas.height / 2 + 60);
+      },
+
+      render(gameState) {
+        const { canvas, ghosty, pipes, clouds, score, highScore, phase, scoreBarHeight } = gameState;
+        this.drawBackground(canvas);
+        this.drawPipes(pipes, canvas, scoreBarHeight);
+        this.drawClouds(clouds);
+        this.drawGhosty(ghosty);
+        this.drawScoreBar(canvas, score, highScore);
+        if (phase === 'idle') this.drawIdleScreen(canvas);
+        if (phase === 'game_over') this.drawGameOverScreen(canvas, score);
+      },
+    };
+
+    // Set up ghosty image loading
+    Renderer.ghostyImg.onerror = () => { Renderer.ghostyImgFailed = true; };
+    Renderer.ghostyImg.src = 'assets/ghosty.png';
+
+    // ─── AABB Collision Detection ────────────────────────────────────────────
+    function aabbOverlap(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    // ─── Game Coordinator ────────────────────────────────────────────────────
+    const Game = {
+      state: null,
+
+      init() {
+        const canvas = document.getElementById('gameCanvas');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        Renderer.ctx = canvas.getContext('2d');
+
+        const { ghostyWidth, ghostyHeight, scoreBarHeight } = getScaledConstants(canvas);
+
+        this.state = {
+          phase: 'idle',
+          canvas,
+          scoreBarHeight,
+          ghosty: {
+            x: canvas.width * 0.2,
+            y: canvas.height / 2,
+            vy: 0,
+            width: ghostyWidth,
+            height: ghostyHeight,
+          },
+          pipes: ObstacleManager.pipes,
+          clouds: ObstacleManager.clouds,
+          score: 0,
+          highScore: 0,
+        };
+
+        InputHandler.bind(canvas);
+        ScoreManager.loadHighScore();
+        this.state.highScore = ScoreManager.highScore;
+
+        Renderer.drawIdleScreen(canvas);
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+          const oldWidth = canvas.width;
+          const oldHeight = canvas.height;
+
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+
+          const newWidth = canvas.width;
+          const newHeight = canvas.height;
+
+          const { ghostyWidth, ghostyHeight, scoreBarHeight: newScoreBarHeight, pipeWidth: newPipeWidth } = getScaledConstants(canvas);
+          const scale = canvas.height / 600;
+          const newCloudWidth = 80 * scale;
+          const newCloudHeight = 30 * scale;
+
+          this.state.scoreBarHeight = newScoreBarHeight;
+
+          // Reposition Ghosty proportionally
+          const ghosty = this.state.ghosty;
+          ghosty.x = ghosty.x * (newWidth / oldWidth);
+          ghosty.y = ghosty.y * (newHeight / oldHeight);
+          ghosty.width = ghostyWidth;
+          ghosty.height = ghostyHeight;
+
+          // Reposition pipes proportionally
+          for (const pipe of this.state.pipes) {
+            pipe.x = pipe.x * (newWidth / oldWidth);
+            pipe.gapTop = pipe.gapTop * (newHeight / oldHeight);
+            pipe.gapBottom = pipe.gapBottom * (newHeight / oldHeight);
+            pipe.width = newPipeWidth;
+          }
+
+          // Reposition clouds proportionally
+          for (const cloud of this.state.clouds) {
+            cloud.x = cloud.x * (newWidth / oldWidth);
+            cloud.y = cloud.y * (newHeight / oldHeight);
+            cloud.width = newCloudWidth;
+            cloud.height = newCloudHeight;
+          }
+        });
+
+        // Start the game loop
+        let lastTime = null;
+        const loop = (timestamp) => {
+          if (lastTime === null) lastTime = timestamp;
+          const dt = timestamp - lastTime;
+          lastTime = timestamp;
+
+          if (canvas.width !== 0 && canvas.height !== 0) {
+            this.update(dt);
+            this.render();
+          }
+
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      },
+
+      start() {
+        this.state.phase = 'playing';
+      },
+
+      restart() {
+        ObstacleManager.reset();
+        ScoreManager.reset();
+        const { canvas, ghosty } = this.state;
+        ghosty.x = canvas.width * 0.2;
+        ghosty.y = canvas.height / 2;
+        ghosty.vy = 0;
+        this.state.pipes = ObstacleManager.pipes;
+        this.state.clouds = ObstacleManager.clouds;
+        this.state.score = 0;
+        this.state.phase = 'playing';
+      },
+
+      gameOver() {
+        this.state.phase = 'game_over';
+        AudioManager.playGameOver();
+      },
+
+      update(dt) {
+        const gs = this.state;
+        const { canvas, ghosty, scoreBarHeight } = gs;
+
+        if (gs.phase === 'idle') {
+          if (InputHandler.consumeFlap()) {
+            AudioManager.unlock();
+            this.start();
+          }
+          return;
+        }
+
+        if (gs.phase === 'playing') {
+          if (InputHandler.consumeFlap()) {
+            AudioManager.playJump();
+            PhysicsEngine.applyFlap(ghosty);
+          }
+
+          PhysicsEngine.applyGravity(ghosty);
+
+          const clamp = PhysicsEngine.clampToBounds(ghosty, canvas.height, scoreBarHeight);
+          if (clamp.gameOver) {
+            this.gameOver();
+            return;
+          }
+
+          ObstacleManager.update(gs);
+          // Keep state arrays in sync after ObstacleManager mutates them
+          gs.pipes = ObstacleManager.pipes;
+          gs.clouds = ObstacleManager.clouds;
+
+          ScoreManager.checkPipeCrossing(ghosty, gs.pipes);
+          gs.score = ScoreManager.score;
+          gs.highScore = ScoreManager.highScore;
+
+          // Collision detection: pipes
+          const ghostyRect = {
+            x: ghosty.x - ghosty.width / 2,
+            y: ghosty.y - ghosty.height / 2,
+            width: ghosty.width,
+            height: ghosty.height,
+          };
+
+          for (const pipe of gs.pipes) {
+            const topRect = { x: pipe.x, y: 0, width: pipe.width, height: pipe.gapTop };
+            const bottomRect = {
+              x: pipe.x,
+              y: pipe.gapBottom,
+              width: pipe.width,
+              height: canvas.height - scoreBarHeight - pipe.gapBottom,
+            };
+            if (aabbOverlap(ghostyRect, topRect) || aabbOverlap(ghostyRect, bottomRect)) {
+              this.gameOver();
+              return;
+            }
+          }
+
+          // Collision detection: clouds
+          for (const cloud of gs.clouds) {
+            const cloudRect = { x: cloud.x, y: cloud.y, width: cloud.width, height: cloud.height };
+            if (aabbOverlap(ghostyRect, cloudRect)) {
+              this.gameOver();
+              return;
+            }
+          }
+
+          return;
+        }
+
+        if (gs.phase === 'game_over') {
+          if (InputHandler.consumeFlap()) {
+            this.restart();
+          }
+        }
+      },
+
+      render() {
+        Renderer.render(this.state);
+      },
+    };
+
+    // ─── Bootstrap ───────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      Game.init();
+    });
+  </script>
+</body>
+</html>
