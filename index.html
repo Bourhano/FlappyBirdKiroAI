@@ -12,14 +12,66 @@
       width: 100vw;
       height: 100vh;
     }
+    #nicknameOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 10;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    #nicknameOverlay.active { display: flex; }
+    #nicknameOverlay h1 { color: #fff; font: bold 2.5rem monospace; }
+    #nicknameOverlay p  { color: #fff; font: 1.2rem monospace; }
+    #nicknameOverlay input {
+      font: 1.4rem monospace;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      width: min(320px, 80vw);
+      text-align: center;
+      outline: none;
+    }
+    #nicknameOverlay button {
+      font: bold 1.1rem monospace;
+      padding: 10px 32px;
+      background: #4CAF50;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #nicknameOverlay button:active { background: #388E3C; }
+    #nicknameError { color: #ff4444; font: 0.95rem monospace; min-height: 1.2em; }
   </style>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="firebase-config.js"></script>
+  <script>
+    // Firebase web config — public by design for browser apps.
+    // Restrict this key to your domain in Google Cloud Console → APIs & Services → Credentials.
+    const firebaseConfig = {
+      apiKey: "AIzaSyDjQFPL5dBKFEMlBlEUMO1jedD1Dquq5sc",
+      authDomain: "flappykiro.firebaseapp.com",
+      projectId: "flappykiro",
+      storageBucket: "flappykiro.firebasestorage.app",
+      messagingSenderId: "684495868635",
+      appId: "1:684495868635:web:dfe59a96a4cdbddd3c32fe",
+    };
+  </script>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
-  <input type="text" id="nicknameInput" autocomplete="off" style="position: absolute; left: -9999px; top: 0;">
+
+  <div id="nicknameOverlay">
+    <h1>Flappy Kiro</h1>
+    <p>Enter your nickname</p>
+    <input type="text" id="nicknameInput" autocomplete="off" maxlength="20" placeholder="Your name..." />
+    <div id="nicknameError"></div>
+    <button id="nicknameConfirm">Play</button>
+  </div>
 
   <script>
     // ─── Scaled Constants ────────────────────────────────────────────────────
@@ -571,7 +623,6 @@
         this.drawGhosty(ghosty);
         this.drawScoreBar(canvas, score, highScore);
         if (phase === 'idle') this.drawIdleScreen(canvas);
-        if (phase === 'nickname') this.drawNicknameScreen(canvas, document.getElementById('nicknameInput'), gameState.nicknameError);
         if (phase === 'leaderboard') this.drawLeaderboardScreen(canvas, gameState.leaderboardEntries, gameState.score, gameState.nickname, gameState.leaderboardLoading, gameState.leaderboardError);
       },
     };
@@ -635,21 +686,35 @@
           this.state.phase = 'idle';
         } else {
           this.state.phase = 'nickname';
-          const nicknameInput = document.getElementById('nicknameInput');
-          if (nicknameInput) nicknameInput.focus();
+          const overlay = document.getElementById('nicknameOverlay');
+          if (overlay) overlay.classList.add('active');
+          setTimeout(() => {
+            const ni = document.getElementById('nicknameInput');
+            if (ni) ni.focus();
+          }, 100);
         }
 
-        // Bind Enter key on nickname input to trigger flap
+        // Wire up nickname confirm (button click + Enter key)
+        const confirmNickname = () => {
+          const input = document.getElementById('nicknameInput');
+          const errorEl = document.getElementById('nicknameError');
+          const value = input ? input.value : '';
+          const result = NicknameManager.validate(value);
+          if (!result.valid) {
+            if (errorEl) errorEl.textContent = result.error;
+            return;
+          }
+          NicknameManager.saveNickname(value);
+          this.state.nickname = value.trim();
+          this.state.nicknameError = null;
+          this.state.phase = 'idle';
+          const overlay = document.getElementById('nicknameOverlay');
+          if (overlay) overlay.classList.remove('active');
+        };
         const nicknameInput = document.getElementById('nicknameInput');
-        if (nicknameInput) {
-          nicknameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && this.state.phase === 'nickname') {
-              InputHandler.pendingFlap = true;
-            }
-          });
-        }
-
-        Renderer.drawIdleScreen(canvas);
+        const confirmBtn = document.getElementById('nicknameConfirm');
+        if (nicknameInput) nicknameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmNickname(); });
+        if (confirmBtn) confirmBtn.addEventListener('click', confirmNickname);
 
         // Resize handler
         window.addEventListener('resize', () => {
@@ -746,19 +811,7 @@
         const { canvas, ghosty, scoreBarHeight } = gs;
 
         if (gs.phase === 'nickname') {
-          if (InputHandler.consumeFlap()) {
-            const inputEl = document.getElementById('nicknameInput');
-            const value = inputEl ? inputEl.value : '';
-            const result = NicknameManager.validate(value);
-            if (!result.valid) {
-              gs.nicknameError = result.error;
-              return;
-            }
-            NicknameManager.saveNickname(value);
-            gs.nickname = value.trim();
-            gs.nicknameError = null;
-            gs.phase = 'idle';
-          }
+          // Handled by HTML overlay — no game loop logic needed
           return;
         }
 
