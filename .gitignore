@@ -53,3 +53,6 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+
+# Firebase config — contains sensitive API keys, never commit
+firebase-config.js

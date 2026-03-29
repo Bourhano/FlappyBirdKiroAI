@@ -1,5 +1,5 @@
 // Unit tests for Game state transitions
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ─── Inline helpers (mirrors index.html) ────────────────────────────────────
 
@@ -96,7 +96,35 @@ function makeRenderer() {
     ctx: {},
     render: vi.fn(),
     drawIdleScreen: vi.fn(),
-    drawGameOverScreen: vi.fn(),
+  };
+}
+
+function makeNicknameManager(opts = {}) {
+  return {
+    STORAGE_KEY: 'flappyKiroNickname',
+    MAX_LENGTH: 20,
+    validate(raw) {
+      const trimmed = raw.trim();
+      if (trimmed.length === 0) return { valid: false, error: 'Nickname cannot be empty' };
+      if (trimmed.length > this.MAX_LENGTH) return { valid: false, error: 'Max 20 characters' };
+      return { valid: true, error: null };
+    },
+    getNickname: vi.fn(() => opts.nickname ?? 'TestPlayer'),
+    saveNickname: vi.fn(),
+    hasNickname: vi.fn(() => opts.hasNickname ?? true),
+  };
+}
+
+function makeLeaderboardManager() {
+  return {
+    db: null,
+    lastEntries: [],
+    isLoading: false,
+    loadError: false,
+    init: vi.fn(),
+    submitScore: vi.fn(() => Promise.resolve()),
+    fetchTopScores: vi.fn(() => Promise.resolve([])),
+    submitAndFetch: vi.fn(() => Promise.resolve([])),
   };
 }
 
@@ -110,8 +138,18 @@ function aabbOverlap(a, b) {
 }
 
 // ─── Game factory ────────────────────────────────────────────────────────────
-// Creates a self-contained Game instance with injected dependencies.
-function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputHandler, AudioManager, Renderer } = {}) {
+function makeGame({
+  canvas,
+  PhysicsEngine,
+  ObstacleManager,
+  ScoreManager,
+  InputHandler,
+  AudioManager,
+  Renderer,
+  NicknameManager,
+  LeaderboardManager,
+  nicknameInputValue = '',
+} = {}) {
   const _canvas = canvas || { width: 400, height: 600 };
   const _physics = PhysicsEngine || makePhysicsEngine();
   const _obstacles = ObstacleManager || makeObstacleManager();
@@ -119,6 +157,8 @@ function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputH
   const _input = InputHandler || makeInputHandler();
   const _audio = AudioManager || makeAudioManager();
   const _renderer = Renderer || makeRenderer();
+  const _nickname = NicknameManager || makeNicknameManager();
+  const _leaderboard = LeaderboardManager || makeLeaderboardManager();
 
   const { ghostyWidth, ghostyHeight, scoreBarHeight } = getScaledConstants(_canvas);
 
@@ -137,6 +177,13 @@ function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputH
     clouds: _obstacles.clouds,
     score: 0,
     highScore: 0,
+    nickname: _nickname.getNickname(),
+    leaderboardEntries: [],
+    leaderboardLoading: false,
+    leaderboardError: false,
+    nicknameError: null,
+    // test helper: simulates the hidden input element value
+    _nicknameInputValue: nicknameInputValue,
   };
 
   const Game = {
@@ -159,13 +206,37 @@ function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputH
     },
 
     gameOver() {
-      state.phase = 'game_over';
+      state.phase = 'leaderboard';
+      state.leaderboardLoading = true;
+      state.leaderboardError = false;
+      state.leaderboardEntries = [];
       _audio.playGameOver();
+      _leaderboard.submitAndFetch(state.nickname || 'Anonymous', state.score).then((entries) => {
+        state.leaderboardEntries = entries;
+        state.leaderboardLoading = _leaderboard.isLoading;
+        state.leaderboardError = _leaderboard.loadError;
+      });
     },
 
-    update(dt) {
+    update() {
       const gs = state;
       const { canvas, ghosty, scoreBarHeight } = gs;
+
+      if (gs.phase === 'nickname') {
+        if (_input.consumeFlap()) {
+          const value = gs._nicknameInputValue || '';
+          const result = _nickname.validate(value);
+          if (!result.valid) {
+            gs.nicknameError = result.error;
+            return;
+          }
+          _nickname.saveNickname(value);
+          gs.nickname = value.trim();
+          gs.nicknameError = null;
+          gs.phase = 'idle';
+        }
+        return;
+      }
 
       if (gs.phase === 'idle') {
         if (_input.consumeFlap()) {
@@ -229,7 +300,7 @@ function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputH
         return;
       }
 
-      if (gs.phase === 'game_over') {
+      if (gs.phase === 'leaderboard') {
         if (_input.consumeFlap()) {
           this.restart();
         }
@@ -241,7 +312,7 @@ function makeGame({ canvas, PhysicsEngine, ObstacleManager, ScoreManager, InputH
     },
   };
 
-  return { Game, state, _input, _audio, _obstacles, _score, _physics };
+  return { Game, state, _input, _audio, _obstacles, _score, _physics, _nickname, _leaderboard };
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -251,11 +322,11 @@ describe('Game state transitions', () => {
     const { Game, state, _input } = makeGame();
     expect(state.phase).toBe('idle');
     _input.pendingFlap = true;
-    Game.update(16);
+    Game.update();
     expect(state.phase).toBe('playing');
   });
 
-  it('playing → game_over on pipe collision', () => {
+  it('playing → leaderboard on pipe collision', () => {
     const canvas = { width: 400, height: 600 };
     const obstacles = makeObstacleManager();
     // Place a pipe that overlaps ghosty (ghosty is at x=80, y=300, 48x48)
@@ -276,15 +347,15 @@ describe('Game state transitions', () => {
     const { Game, state } = makeGame({ canvas, ObstacleManager: obstacles });
     state.phase = 'playing';
 
-    Game.update(16);
-    expect(state.phase).toBe('game_over');
+    Game.update();
+    expect(state.phase).toBe('leaderboard');
   });
 
-  it('game_over → playing on flap input (restart)', () => {
+  it('leaderboard → playing on flap input (restart)', () => {
     const { Game, state, _input } = makeGame();
-    state.phase = 'game_over';
+    state.phase = 'leaderboard';
     _input.pendingFlap = true;
-    Game.update(16);
+    Game.update();
     expect(state.phase).toBe('playing');
   });
 
@@ -292,14 +363,13 @@ describe('Game state transitions', () => {
     const { Game, state, _input, _audio } = makeGame();
     state.phase = 'playing';
     _input.pendingFlap = true;
-    Game.update(16);
+    Game.update();
     expect(_audio.playJump).toHaveBeenCalled();
   });
 
   it('playGameOver() is called on game over transition', () => {
     const canvas = { width: 400, height: 600 };
     const obstacles = makeObstacleManager();
-    // Pipe overlapping ghosty to trigger game over
     obstacles.pipes = [{
       x: 50,
       gapTop: 300,
@@ -315,7 +385,7 @@ describe('Game state transitions', () => {
     const { Game, state, _audio } = makeGame({ canvas, ObstacleManager: obstacles });
     state.phase = 'playing';
 
-    Game.update(16);
+    Game.update();
     expect(_audio.playGameOver).toHaveBeenCalled();
   });
 
@@ -326,8 +396,7 @@ describe('Game state transitions', () => {
 
     const { Game, state } = makeGame({ canvas, ObstacleManager: obstacles, ScoreManager: score });
 
-    // Simulate some game state
-    state.phase = 'game_over';
+    state.phase = 'leaderboard';
     state.score = 10;
     obstacles.pipes = [{ x: 100, gapTop: 200, gapBottom: 360, width: 60, scored: true }];
     obstacles.clouds = [{ x: 200, y: 100, width: 80, height: 30 }];
@@ -345,14 +414,57 @@ describe('Game state transitions', () => {
 
   it('game over triggered by bottom boundary (clampToBounds)', () => {
     const canvas = { width: 400, height: 600 };
-    const { ghostyHeight, scoreBarHeight } = getScaledConstants(canvas);
+    const { scoreBarHeight } = getScaledConstants(canvas);
 
     const { Game, state } = makeGame({ canvas });
     state.phase = 'playing';
-    // Push ghosty to the floor
     state.ghosty.y = canvas.height - scoreBarHeight + 1;
 
-    Game.update(16);
-    expect(state.phase).toBe('game_over');
+    Game.update();
+    expect(state.phase).toBe('leaderboard');
+  });
+
+  it('nickname → idle on valid nickname confirm', () => {
+    const { Game, state, _input } = makeGame({ nicknameInputValue: 'Ghosty' });
+    state.phase = 'nickname';
+    _input.pendingFlap = true;
+    Game.update();
+    expect(state.phase).toBe('idle');
+    expect(state.nickname).toBe('Ghosty');
+    expect(state.nicknameError).toBeNull();
+  });
+
+  it('nickname phase shows error on invalid (empty) nickname', () => {
+    const { Game, state, _input } = makeGame({ nicknameInputValue: '' });
+    state.phase = 'nickname';
+    _input.pendingFlap = true;
+    Game.update();
+    expect(state.phase).toBe('nickname');
+    expect(state.nicknameError).toBeTruthy();
+  });
+
+  it('leaderboard phase sets loading=true and calls submitAndFetch on game over', () => {
+    const canvas = { width: 400, height: 600 };
+    const obstacles = makeObstacleManager();
+    obstacles.pipes = [{
+      x: 50,
+      gapTop: 300,
+      gapBottom: 460,
+      width: 60,
+      scored: false,
+    }];
+    obstacles.update = vi.fn(gs => {
+      gs.pipes = obstacles.pipes;
+      gs.clouds = obstacles.clouds;
+    });
+
+    const leaderboard = makeLeaderboardManager();
+    const { Game, state } = makeGame({ canvas, ObstacleManager: obstacles, LeaderboardManager: leaderboard });
+    state.phase = 'playing';
+
+    Game.update();
+    expect(state.phase).toBe('leaderboard');
+    expect(state.leaderboardLoading).toBe(true);
+    expect(leaderboard.submitAndFetch).toHaveBeenCalled();
   });
 });

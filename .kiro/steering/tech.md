@@ -5,7 +5,10 @@
 - Single HTML file (`index.html`) contains all game logic as inline `<script>`
 - Browser Canvas API (`CanvasRenderingContext2D`) for all rendering
 - Web Audio API via `new Audio()` for sound effects
-- `localStorage` for high score persistence
+- `localStorage` for high score and nickname persistence
+- Firebase Firestore (v9 compat) loaded via CDN `<script>` tags — no npm bundler involved
+  - `firebase-app-compat` and `firebase-firestore-compat` from `https://www.gstatic.com/firebasejs/9.23.0/`
+  - Initialized once in `LeaderboardManager.init()`; all Firestore ops are client-side
 
 ## Testing
 - **Test runner**: [Vitest](https://vitest.dev/) v1.6+ with `jsdom` environment

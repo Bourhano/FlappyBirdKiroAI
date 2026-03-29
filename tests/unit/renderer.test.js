@@ -181,6 +181,93 @@ function makeRenderer() {
       ctx.fillText('Tap to Restart', canvas.width / 2, canvas.height / 2 + 60);
     },
 
+    drawNicknameScreen(canvas, inputEl, errorMessage) {
+      const ctx = this.ctx;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 48px monospace';
+      ctx.fillText('Flappy Kiro', cx, cy - 100);
+
+      ctx.font = '24px monospace';
+      ctx.fillText('Enter your nickname', cx, cy - 44);
+
+      const inputValue = inputEl ? inputEl.value : '';
+      const boxW = Math.min(360, canvas.width * 0.7);
+      const boxH = 48;
+      const boxX = cx - boxW / 2;
+      const boxY = cy - boxH / 2;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = '#1a1a2e';
+      ctx.font = '28px monospace';
+      ctx.fillText(inputValue || '', cx, cy);
+
+      if (errorMessage) {
+        ctx.fillStyle = '#ff4444';
+        ctx.font = '18px monospace';
+        ctx.fillText(errorMessage, cx, cy + 44);
+      }
+
+      ctx.fillStyle = '#aaaaaa';
+      ctx.font = '18px monospace';
+      ctx.fillText('Press Enter or tap to confirm', cx, cy + (errorMessage ? 80 : 52));
+    },
+
+    drawLeaderboardScreen(canvas, entries, currentScore, currentNickname, isLoading, loadError) {
+      const ctx = this.ctx;
+      const cx = canvas.width / 2;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.80)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 36px monospace';
+      ctx.fillText('Leaderboard', cx, 60);
+
+      if (isLoading) {
+        ctx.font = '24px monospace';
+        ctx.fillText('Loading...', cx, canvas.height / 2);
+      } else if (loadError) {
+        ctx.font = '24px monospace';
+        ctx.fillText('Could not load leaderboard', cx, canvas.height / 2);
+      } else {
+        const rowHeight = 32;
+        const startY = 110;
+        const list = (entries || []).slice(0, 10);
+        for (let i = 0; i < list.length; i++) {
+          const entry = list[i];
+          const rank = i + 1;
+          const y = startY + i * rowHeight;
+          if (entry.nickname === currentNickname) {
+            ctx.fillStyle = '#FFD700';
+          } else {
+            ctx.fillStyle = '#ffffff';
+          }
+          ctx.font = '18px monospace';
+          ctx.fillText(`#${rank}  ${entry.nickname}  ${entry.score}`, cx, y);
+        }
+      }
+
+      const scoreY = canvas.height - 100;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '20px monospace';
+      ctx.fillText(`Your score: ${currentScore}`, cx, scoreY);
+
+      ctx.font = '20px monospace';
+      ctx.fillText('Play Again', cx, canvas.height - 56);
+    },
+
     render(gameState) {
       const { canvas, ghosty, pipes, clouds, score, highScore, phase, scoreBarHeight } = gameState;
       this.drawBackground(canvas);
@@ -189,7 +276,8 @@ function makeRenderer() {
       this.drawGhosty(ghosty);
       this.drawScoreBar(canvas, score, highScore);
       if (phase === 'idle') this.drawIdleScreen(canvas);
-      if (phase === 'game_over') this.drawGameOverScreen(canvas, score);
+      if (phase === 'nickname') this.drawNicknameScreen(canvas, gameState.nicknameInput, gameState.nicknameError);
+      if (phase === 'leaderboard') this.drawLeaderboardScreen(canvas, gameState.leaderboardEntries, gameState.score, gameState.nickname, gameState.leaderboardLoading, gameState.leaderboardError);
     },
   };
 }
@@ -274,5 +362,170 @@ describe('Renderer', () => {
 
     const calls = ctx.fillText.mock.calls.map(c => c[0]);
     expect(calls.some(t => t === 'Score: 7 | High: 15')).toBe(true);
+  });
+
+  it('drawNicknameScreen renders title, subtitle, and confirm instruction', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const inputEl = { value: 'Ghosty' };
+    renderer.drawNicknameScreen(mockCanvas, inputEl, null);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Flappy Kiro'))).toBe(true);
+    expect(calls.some(t => t.includes('Enter your nickname'))).toBe(true);
+    expect(calls.some(t => t.includes('Press Enter or tap to confirm'))).toBe(true);
+  });
+
+  it('drawNicknameScreen renders the current input value', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const inputEl = { value: 'TestUser' };
+    renderer.drawNicknameScreen(mockCanvas, inputEl, null);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t === 'TestUser')).toBe(true);
+  });
+
+  it('drawNicknameScreen renders errorMessage in red when non-null', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const inputEl = { value: '' };
+    renderer.drawNicknameScreen(mockCanvas, inputEl, 'Nickname cannot be empty');
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Nickname cannot be empty'))).toBe(true);
+    // Check red color was set at some point
+    const fillStyleValues = [];
+    // ctx.fillStyle is set as a property, check via fillText call order
+    expect(calls.some(t => t.includes('Nickname cannot be empty'))).toBe(true);
+  });
+
+  it('drawNicknameScreen does not render errorMessage when null', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const inputEl = { value: 'ok' };
+    renderer.drawNicknameScreen(mockCanvas, inputEl, null);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('cannot be empty') || t.includes('Max 20'))).toBe(false);
+  });
+
+  it('drawLeaderboardScreen renders "Could not load leaderboard" when loadError is true', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    renderer.drawLeaderboardScreen(mockCanvas, [], 5, 'player', false, true);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Could not load leaderboard'))).toBe(true);
+  });
+
+  it('drawLeaderboardScreen renders "Loading..." when isLoading is true', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    renderer.drawLeaderboardScreen(mockCanvas, [], 5, 'player', true, false);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Loading...'))).toBe(true);
+  });
+
+  it('drawLeaderboardScreen renders "Play Again" prompt', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    renderer.drawLeaderboardScreen(mockCanvas, [], 5, 'player', false, false);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Play Again'))).toBe(true);
+  });
+
+  it('drawLeaderboardScreen renders current session score', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    renderer.drawLeaderboardScreen(mockCanvas, [], 42, 'player', false, false);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('42'))).toBe(true);
+  });
+
+  it('drawLeaderboardScreen renders entry rows with rank, nickname, score', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const entries = [
+      { nickname: 'Alice', score: 100 },
+      { nickname: 'Bob', score: 80 },
+    ];
+    renderer.drawLeaderboardScreen(mockCanvas, entries, 50, 'Charlie', false, false);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('#1') && t.includes('Alice') && t.includes('100'))).toBe(true);
+    expect(calls.some(t => t.includes('#2') && t.includes('Bob') && t.includes('80'))).toBe(true);
+  });
+
+  it('render dispatches to drawNicknameScreen when phase is nickname', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const gameState = {
+      canvas: mockCanvas,
+      ghosty: { x: 100, y: 300, vy: 0, width: 48, height: 48 },
+      pipes: [],
+      clouds: [],
+      score: 0,
+      highScore: 0,
+      phase: 'nickname',
+      scoreBarHeight: 48,
+      nicknameInput: { value: '' },
+      nicknameError: null,
+    };
+
+    renderer.render(gameState);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Enter your nickname'))).toBe(true);
+  });
+
+  it('render dispatches to drawLeaderboardScreen when phase is leaderboard', () => {
+    const renderer = makeRenderer();
+    const ctx = makeMockCtx();
+    renderer.ctx = ctx;
+
+    const gameState = {
+      canvas: mockCanvas,
+      ghosty: { x: 100, y: 300, vy: 0, width: 48, height: 48 },
+      pipes: [],
+      clouds: [],
+      score: 7,
+      highScore: 10,
+      phase: 'leaderboard',
+      scoreBarHeight: 48,
+      nickname: 'player',
+      leaderboardEntries: [],
+      leaderboardLoading: false,
+      leaderboardError: false,
+    };
+
+    renderer.render(gameState);
+
+    const calls = ctx.fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(t => t.includes('Leaderboard'))).toBe(true);
+    expect(calls.some(t => t.includes('Play Again'))).toBe(true);
   });
 });

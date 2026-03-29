@@ -15,13 +15,18 @@ flappy-kiro/
 │   │   ├── renderer.test.js
 │   │   ├── audio_manager.test.js
 │   │   ├── input_handler.test.js
-│   │   └── game_states.test.js
+│   │   ├── game_states.test.js
+│   │   ├── nickname_manager.test.js
+│   │   └── leaderboard_manager.test.js
 │   └── property/               # fast-check property-based tests (one file per module)
 │       ├── physics.property.test.js
 │       ├── collision.property.test.js
 │       ├── obstacle_manager.property.test.js
 │       ├── score_manager.property.test.js
-│       └── renderer.property.test.js
+│       ├── renderer.property.test.js
+│       ├── nickname_manager.property.test.js
+│       ├── leaderboard_manager.property.test.js
+│       └── leaderboard_renderer.property.test.js
 ├── vitest.config.js            # Vitest config (jsdom environment)
 └── package.json
 ```
@@ -37,8 +42,10 @@ All game logic is organized as plain object literals (singletons) inside `index.
 | `ScoreManager` | Score tracking, high score persistence |
 | `InputHandler` | Keyboard / click / touch input, flap queue |
 | `AudioManager` | Sound effect playback, audio unlock |
-| `Renderer` | All canvas drawing (background, pipes, clouds, ghosty, UI) |
+| `Renderer` | All canvas drawing (background, pipes, clouds, ghosty, UI, leaderboard, nickname screens) |
 | `Game` | Main coordinator — game loop, phase transitions, collision |
+| `NicknameManager` | Nickname prompt, validation, localStorage persistence |
+| `LeaderboardManager` | Firebase init, score submission, top-10 fetch |
 | `getScaledConstants()` | Returns all physics/layout constants scaled to canvas height |
 | `aabbOverlap()` | Standalone AABB collision helper |
 
@@ -49,4 +56,9 @@ All game logic is organized as plain object literals (singletons) inside `index.
 - Game state is passed as a `gameState` object to modules that need canvas/ghosty/pipe references
 - Test files re-implement the module under test inline (no imports from `index.html`)
 - Unit tests go in `tests/unit/`, property tests go in `tests/property/`
-- Property test comments follow the format: `// Feature: flappy-kiro, Property N: <description>`
+- Property test comments follow the format: `// Feature: <feature-name>, Property N: <description>`
+- Game phases: `nickname` → `idle` → `playing` → `leaderboard` (`game_over` phase is retired)
+- `NicknameManager` is stateless w.r.t. the canvas — it only touches `localStorage`
+- `LeaderboardManager.db` is `null` when Firebase SDK is unavailable; all methods must guard against this
+- All Firestore errors must be caught, logged via `console.warn`, and never propagate as uncaught exceptions
+- A hidden `<input id="nicknameInput">` (off-screen via CSS) is used for mobile keyboard capture during the `nickname` phase

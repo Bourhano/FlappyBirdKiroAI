@@ -13,9 +13,13 @@
       height: 100vh;
     }
   </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
+  <input type="text" id="nicknameInput" autocomplete="off" style="position: absolute; left: -9999px; top: 0;">
 
   <script>
     // ─── Scaled Constants ────────────────────────────────────────────────────
@@ -169,6 +173,106 @@
       },
       reset() {
         this.score = 0;
+      },
+    };
+
+    // ─── Nickname Manager ────────────────────────────────────────────────────
+    const NicknameManager = {
+      STORAGE_KEY: 'flappyKiroNickname',
+      MAX_LENGTH: 20,
+
+      validate(raw) {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) return { valid: false, error: 'Nickname cannot be empty' };
+        if (trimmed.length > this.MAX_LENGTH) return { valid: false, error: 'Max 20 characters' };
+        return { valid: true, error: null };
+      },
+
+      getNickname() {
+        try {
+          return localStorage.getItem(this.STORAGE_KEY);
+        } catch {
+          return null;
+        }
+      },
+
+      saveNickname(raw) {
+        const trimmed = raw.trim();
+        const { valid } = this.validate(trimmed);
+        if (!valid) return false;
+        try {
+          localStorage.setItem(this.STORAGE_KEY, trimmed);
+        } catch { /* silent no-op */ }
+        return true;
+      },
+
+      hasNickname() {
+        const nickname = this.getNickname();
+        return nickname !== null && nickname.length > 0;
+      },
+    };
+
+    // ─── Leaderboard Manager ─────────────────────────────────────────────────
+    const LeaderboardManager = {
+      db: null,
+      lastEntries: [],
+      isLoading: false,
+      loadError: false,
+
+      init() {
+        try {
+          if (typeof window.firebase === 'undefined' || typeof firebaseConfig === 'undefined') return;
+          firebase.initializeApp(firebaseConfig);
+          this.db = firebase.firestore();
+        } catch (e) {
+          console.warn('LeaderboardManager.init() failed:', e);
+        }
+      },
+
+      submitScore(nickname, score) {
+        if (score === 0 || this.db === null) return Promise.resolve();
+        return new Promise((resolve) => {
+          this.db.collection('scores').add({ nickname, score, timestamp: Date.now() })
+            .then(() => resolve())
+            .catch((e) => {
+              console.warn('LeaderboardManager.submitScore() failed:', e);
+              resolve();
+            });
+        });
+      },
+
+      fetchTopScores() {
+        if (this.db === null) return Promise.resolve([]);
+        this.isLoading = true;
+        this.loadError = false;
+        const query = this.db.collection('scores').orderBy('score', 'desc').limit(10).get();
+        const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
+        return Promise.race([query, timeout])
+          .then((result) => {
+            if (result === null) {
+              this.loadError = true;
+              console.warn('LeaderboardManager.fetchTopScores() timed out');
+              return [];
+            }
+            const entries = result.docs.map((doc) => {
+              const data = doc.data();
+              return { nickname: data.nickname, score: data.score, timestamp: data.timestamp };
+            });
+            this.lastEntries = entries;
+            return entries;
+          })
+          .catch((e) => {
+            this.loadError = true;
+            console.warn('LeaderboardManager.fetchTopScores() failed:', e);
+            return [];
+          })
+          .finally(() => {
+            this.isLoading = false;
+          });
+      },
+
+      submitAndFetch(nickname, score) {
+        return this.submitScore(nickname, score).then(() => this.fetchTopScores());
       },
     };
 
@@ -361,6 +465,104 @@
         ctx.fillText('Tap to Restart', canvas.width / 2, canvas.height / 2 + 60);
       },
 
+      drawNicknameScreen(canvas, inputEl, errorMessage) {
+        const ctx = this.ctx;
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        // Dark overlay
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Title
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 48px monospace';
+        ctx.fillText('Flappy Kiro', cx, cy - 100);
+
+        // Subtitle
+        ctx.font = '24px monospace';
+        ctx.fillText('Enter your nickname', cx, cy - 44);
+
+        // Input box with current typed value
+        const inputValue = inputEl ? inputEl.value : '';
+        const boxW = Math.min(360, canvas.width * 0.7);
+        const boxH = 48;
+        const boxX = cx - boxW / 2;
+        const boxY = cy - boxH / 2;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(boxX, boxY, boxW, boxH);
+        ctx.fillStyle = '#1a1a2e';
+        ctx.font = '28px monospace';
+        ctx.fillText(inputValue || '', cx, cy);
+
+        // Error message
+        if (errorMessage) {
+          ctx.fillStyle = '#ff4444';
+          ctx.font = '18px monospace';
+          ctx.fillText(errorMessage, cx, cy + 44);
+        }
+
+        // Confirm instruction
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = '18px monospace';
+        ctx.fillText('Press Enter or tap to confirm', cx, cy + (errorMessage ? 80 : 52));
+      },
+
+      drawLeaderboardScreen(canvas, entries, currentScore, currentNickname, isLoading, loadError) {
+        const ctx = this.ctx;
+        const cx = canvas.width / 2;
+
+        // Dark overlay
+        ctx.fillStyle = 'rgba(0,0,0,0.80)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Title
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText('Leaderboard', cx, 60);
+
+        if (isLoading) {
+          ctx.font = '24px monospace';
+          ctx.fillText('Loading...', cx, canvas.height / 2);
+        } else if (loadError) {
+          ctx.font = '24px monospace';
+          ctx.fillText('Could not load leaderboard', cx, canvas.height / 2);
+        } else {
+          // Entry rows — up to 10
+          const rowHeight = 32;
+          const startY = 110;
+          const list = (entries || []).slice(0, 10);
+          for (let i = 0; i < list.length; i++) {
+            const entry = list[i];
+            const rank = i + 1;
+            const y = startY + i * rowHeight;
+            if (entry.nickname === currentNickname) {
+              ctx.fillStyle = '#FFD700';
+            } else {
+              ctx.fillStyle = '#ffffff';
+            }
+            ctx.font = '18px monospace';
+            ctx.fillText(`#${rank}  ${entry.nickname}  ${entry.score}`, cx, y);
+          }
+        }
+
+        // Current session score
+        const scoreY = canvas.height - 100;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px monospace';
+        ctx.fillText(`Your score: ${currentScore}`, cx, scoreY);
+
+        // Play Again prompt
+        ctx.font = '20px monospace';
+        ctx.fillText('Play Again', cx, canvas.height - 56);
+      },
+
       render(gameState) {
         const { canvas, ghosty, pipes, clouds, score, highScore, phase, scoreBarHeight } = gameState;
         this.drawBackground(canvas);
@@ -369,7 +571,8 @@
         this.drawGhosty(ghosty);
         this.drawScoreBar(canvas, score, highScore);
         if (phase === 'idle') this.drawIdleScreen(canvas);
-        if (phase === 'game_over') this.drawGameOverScreen(canvas, score);
+        if (phase === 'nickname') this.drawNicknameScreen(canvas, document.getElementById('nicknameInput'), gameState.nicknameError);
+        if (phase === 'leaderboard') this.drawLeaderboardScreen(canvas, gameState.leaderboardEntries, gameState.score, gameState.nickname, gameState.leaderboardLoading, gameState.leaderboardError);
       },
     };
 
@@ -398,6 +601,8 @@
 
         Renderer.ctx = canvas.getContext('2d');
 
+        LeaderboardManager.init();
+
         const { ghostyWidth, ghostyHeight, scoreBarHeight } = getScaledConstants(canvas);
 
         this.state = {
@@ -415,11 +620,34 @@
           clouds: ObstacleManager.clouds,
           score: 0,
           highScore: 0,
+          nickname: NicknameManager.getNickname(),
+          leaderboardEntries: [],
+          leaderboardLoading: false,
+          leaderboardError: false,
+          nicknameError: null,
         };
 
         InputHandler.bind(canvas);
         ScoreManager.loadHighScore();
         this.state.highScore = ScoreManager.highScore;
+
+        if (NicknameManager.hasNickname()) {
+          this.state.phase = 'idle';
+        } else {
+          this.state.phase = 'nickname';
+          const nicknameInput = document.getElementById('nicknameInput');
+          if (nicknameInput) nicknameInput.focus();
+        }
+
+        // Bind Enter key on nickname input to trigger flap
+        const nicknameInput = document.getElementById('nicknameInput');
+        if (nicknameInput) {
+          nicknameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && this.state.phase === 'nickname') {
+              InputHandler.pendingFlap = true;
+            }
+          });
+        }
 
         Renderer.drawIdleScreen(canvas);
 
@@ -500,13 +728,39 @@
       },
 
       gameOver() {
-        this.state.phase = 'game_over';
+        const gs = this.state;
+        gs.phase = 'leaderboard';
+        gs.leaderboardLoading = true;
+        gs.leaderboardError = false;
+        gs.leaderboardEntries = [];
         AudioManager.playGameOver();
+        LeaderboardManager.submitAndFetch(gs.nickname || 'Anonymous', gs.score).then((entries) => {
+          gs.leaderboardEntries = entries;
+          gs.leaderboardLoading = LeaderboardManager.isLoading;
+          gs.leaderboardError = LeaderboardManager.loadError;
+        });
       },
 
       update(dt) {
         const gs = this.state;
         const { canvas, ghosty, scoreBarHeight } = gs;
+
+        if (gs.phase === 'nickname') {
+          if (InputHandler.consumeFlap()) {
+            const inputEl = document.getElementById('nicknameInput');
+            const value = inputEl ? inputEl.value : '';
+            const result = NicknameManager.validate(value);
+            if (!result.valid) {
+              gs.nicknameError = result.error;
+              return;
+            }
+            NicknameManager.saveNickname(value);
+            gs.nickname = value.trim();
+            gs.nicknameError = null;
+            gs.phase = 'idle';
+          }
+          return;
+        }
 
         if (gs.phase === 'idle') {
           if (InputHandler.consumeFlap()) {
@@ -564,7 +818,7 @@
           return;
         }
 
-        if (gs.phase === 'game_over') {
+        if (gs.phase === 'leaderboard') {
           if (InputHandler.consumeFlap()) {
             this.restart();
           }
