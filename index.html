@@ -25,7 +25,8 @@
         gravity: 0.5 * scale,
         flapVelocity: -9 * scale,
         scrollSpeed: 3 * scale,
-        gapSize: 160 * scale,
+        gapSize: 180 * scale,
+        pipeInterval: 220 * scale,
         pipeWidth: 60 * scale,
         ghostyWidth: 48 * scale,
         ghostyHeight: 48 * scale,
@@ -61,7 +62,7 @@
     const ObstacleManager = {
       PIPE_INTERVAL: 220,
       SCROLL_SPEED: 3,
-      GAP_SIZE: 160,
+      GAP_SIZE: 180,
       pipes: [],
       clouds: [],
 
@@ -114,7 +115,7 @@
         this.clouds = this.clouds.filter(c => c.x + c.width > 0);
 
         // Spawn new pipe when it's time
-        const pipeInterval = this.PIPE_INTERVAL * (canvas.height / 600);
+        const pipeInterval = getScaledConstants(canvas).pipeInterval;
         if (gameState.nextPipeX !== undefined) {
           if (canvas.width >= gameState.nextPipeX) {
             // use nextPipeX tracking
@@ -179,7 +180,7 @@
           if (e.code === 'Space' || e.key === ' ') this.pendingFlap = true;
         });
         canvas.addEventListener('click', () => { this.pendingFlap = true; });
-        canvas.addEventListener('touchstart', () => { this.pendingFlap = true; });
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); this.pendingFlap = true; });
       },
       consumeFlap() {
         if (this.pendingFlap) {
@@ -288,6 +289,7 @@
 
       drawClouds(clouds) {
         const ctx = this.ctx;
+        ctx.globalAlpha = 0.4;
         for (const cloud of clouds) {
           const r = cloud.height / 2;
           ctx.fillStyle = '#ffffff';
@@ -312,6 +314,7 @@
           ctx.lineWidth = 1;
           ctx.stroke();
         }
+        ctx.globalAlpha = 1;
       },
 
       drawScoreBar(canvas, score, highScore) {
@@ -553,15 +556,6 @@
               height: canvas.height - scoreBarHeight - pipe.gapBottom,
             };
             if (aabbOverlap(ghostyRect, topRect) || aabbOverlap(ghostyRect, bottomRect)) {
-              this.gameOver();
-              return;
-            }
-          }
-
-          // Collision detection: clouds
-          for (const cloud of gs.clouds) {
-            const cloudRect = { x: cloud.x, y: cloud.y, width: cloud.width, height: cloud.height };
-            if (aabbOverlap(ghostyRect, cloudRect)) {
               this.gameOver();
               return;
             }

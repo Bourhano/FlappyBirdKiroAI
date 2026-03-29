@@ -10,7 +10,7 @@ Flappy Kiro is a retro-styled, browser-based endless scroller game. The player g
 - **Ghosty**: The ghost character sprite controlled by the player, rendered using `assets/ghosty.png`
 - **Pipe**: A green Mario-style obstacle pair (top pipe + bottom pipe) with a gap that Ghosty must fly through
 - **Gap**: The vertical opening between a top pipe and bottom pipe through which Ghosty must pass
-- **Cloud**: A floating white rounded-rectangle obstacle that Ghosty must avoid
+- **Cloud**: A floating white rounded-rectangle decoration that scrolls across the background; Ghosty does not collide with Clouds
 - **Score**: The count of Pipe pairs successfully passed through during the current session
 - **High_Score**: The highest Score achieved, persisted across sessions via localStorage
 - **Canvas**: The HTML5 canvas element on which the game is rendered
@@ -59,7 +59,7 @@ Flappy Kiro is a retro-styled, browser-based endless scroller game. The player g
 
 1. WHEN the player presses the spacebar, THE Input_Handler SHALL trigger a flap action.
 2. WHEN the player clicks the Canvas, THE Input_Handler SHALL trigger a flap action.
-3. WHEN the player taps the Canvas on a touch device, THE Input_Handler SHALL trigger a flap action.
+3. WHEN the player taps the Canvas on a touch device, THE Input_Handler SHALL trigger a flap action and call `preventDefault()` on the `touchstart` event to suppress the subsequent synthetic click event.
 4. WHEN a flap action is triggered during the playing state, THE Physics_Engine SHALL apply the upward velocity impulse to Ghosty.
 5. WHEN a flap action is triggered during the game over state, THE Game SHALL restart a new session.
 6. WHEN a flap action is triggered during the idle/start state, THE Game SHALL transition to the playing state.
@@ -89,9 +89,8 @@ Flappy Kiro is a retro-styled, browser-based endless scroller game. The player g
 
 1. THE Obstacle_Manager SHALL spawn Cloud obstacles at randomized vertical positions off the right edge of the Canvas.
 2. WHILE the Game is in the playing state, THE Obstacle_Manager SHALL move all active Clouds leftward at the same scroll speed as Pipes.
-3. THE Renderer SHALL draw Clouds as white rounded rectangles with a sketchy, hand-drawn style.
-4. WHEN Ghosty's bounding box overlaps a Cloud's bounding box, THE Game SHALL transition to the game over state.
-5. WHEN a Cloud moves entirely off the left edge of the Canvas, THE Obstacle_Manager SHALL remove it from the active obstacle list.
+3. THE Renderer SHALL draw Clouds as white rounded rectangles with a sketchy, hand-drawn style at approximately 0.4 opacity (semi-transparent) to indicate they are background decoration.
+4. WHEN a Cloud moves entirely off the left edge of the Canvas, THE Obstacle_Manager SHALL remove it from the active obstacle list.
 
 ---
 
@@ -102,9 +101,8 @@ Flappy Kiro is a retro-styled, browser-based endless scroller game. The player g
 #### Acceptance Criteria
 
 1. WHEN Ghosty's bounding box overlaps any Pipe's bounding box, THE Game SHALL transition to the game over state.
-2. WHEN Ghosty's bounding box overlaps any Cloud's bounding box, THE Game SHALL transition to the game over state.
-3. IF Ghosty's vertical position reaches the bottom score bar boundary, THEN THE Game SHALL transition to the game over state.
-4. THE Game SHALL use axis-aligned bounding box (AABB) collision detection for all collision checks.
+2. IF Ghosty's vertical position reaches the bottom score bar boundary, THEN THE Game SHALL transition to the game over state.
+3. THE Game SHALL use axis-aligned bounding box (AABB) collision detection for all collision checks.
 
 ---
 
@@ -143,7 +141,7 @@ Flappy Kiro is a retro-styled, browser-based endless scroller game. The player g
 1. THE Renderer SHALL draw the background as a light blue color with a sketchy, hand-drawn texture effect.
 2. THE Renderer SHALL draw Ghosty using the sprite image `assets/ghosty.png` centered at Ghosty's position.
 3. THE Renderer SHALL draw Pipes with a green fill and a slightly irregular, hand-drawn outline style.
-4. THE Renderer SHALL draw Clouds as white rounded rectangles with a soft, sketchy outline.
+4. THE Renderer SHALL draw Clouds as white rounded rectangles with a soft, sketchy outline at approximately 0.4 opacity (semi-transparent) to indicate they are background decoration.
 5. THE Renderer SHALL use a pixel-art or retro-compatible font for all on-screen text.
 6. THE Renderer SHALL draw the score bar as a dark-colored strip anchored to the bottom of the Canvas.
 

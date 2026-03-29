@@ -136,7 +136,7 @@ Implement the Flappy Kiro game as a single `index.html` file with vanilla JavaSc
     - _Requirements: 6.4_
   - [ ]* 9.2 Write property test for AABB correctness (Property 10)
     - **Property 10: AABB collision detection correctness**
-    - **Validates: Requirements 6.1, 6.2, 6.4**
+    - **Validates: Requirements 6.1, 6.3, 6.4**
 
 - [x] 10. Implement `Game` coordinator and game loop
   - [x] 10.1 Implement `Game.init()` — create canvas, set up `GameState`, bind `InputHandler`, load assets, call `ScoreManager.loadHighScore()`, call `Renderer.drawIdleScreen()`
@@ -169,6 +169,27 @@ Implement the Flappy Kiro game as a single `index.html` file with vanilla JavaSc
 
 - [x] 13. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
+
+## Mobile Bug Fix Tasks
+
+- [x] 14. Fix touch input double-flap on mobile
+  - Update `InputHandler.bind()` to call `e.preventDefault()` on the `touchstart` event handler to suppress the synthetic `click` event that fires after a touch
+  - This prevents both `touchstart` and `click` from firing for the same tap, eliminating the double-flap bug
+  - _Requirements: 3.3_
+
+- [x] 15. Make clouds decorative — remove collision, add semi-transparency
+  - Remove cloud collision detection from `Game.update()` — clouds no longer cause game over
+  - Update `Renderer.drawClouds()` to set `ctx.globalAlpha = 0.4` before drawing and restore it to `1` after
+  - _Requirements: 5.3, 6.1_
+
+- [x] 16. Tune physics constants for mobile
+  - Update `getScaledConstants` to use `gapSize: 180 * scale` (was `160 * scale`)
+  - Update `getScaledConstants` to include `pipeInterval: 220 * scale` so pipe spawn frequency scales with canvas height
+  - _Requirements: 1.4, 4.1_
+
+- [x] 17. Final checkpoint — run all tests and verify fixes
+  - Run `npm test` and confirm all tests pass
+  - Manually verify on a mobile viewport: single flap per tap, clouds are semi-transparent and non-lethal, pipe gaps feel generous
 
 ## Notes
 

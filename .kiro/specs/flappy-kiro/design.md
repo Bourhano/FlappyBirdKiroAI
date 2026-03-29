@@ -45,7 +45,7 @@ Each frame follows this sequence:
 2. `Physics_Engine` updates Ghosty position/velocity
 3. `Obstacle_Manager` moves obstacles, spawns new ones, despawns off-screen ones
 4. `Score_Manager` checks pipe crossing
-5. Collision detection runs
+5. Collision detection runs (pipes and boundaries only — clouds are decorative and excluded)
 6. `Renderer` clears canvas and draws all elements
 7. `Game_Loop` schedules next frame via `requestAnimationFrame`
 
@@ -63,7 +63,7 @@ Game = {
   start(),         // transition idle -> playing
   restart(),       // reset state, transition game_over -> playing
   gameOver(),      // transition playing -> game_over, play sound
-  update(dt),      // orchestrate per-frame updates
+  update(dt),      // orchestrate per-frame updates; collision checks pipes and boundaries only (clouds excluded)
   render(),        // delegate to Renderer
 }
 ```
@@ -90,7 +90,7 @@ Manages the arrays of active pipes and clouds.
 ObstacleManager = {
   PIPE_INTERVAL: 220,   // px between pipe spawns
   SCROLL_SPEED: 3,      // px/frame (scaled)
-  GAP_SIZE: 160,        // px (scaled)
+  GAP_SIZE: 180,        // px (scaled) — increased from 160 for more generous mobile gap
   pipes: [],
   clouds: [],
   update(gameState),
@@ -123,7 +123,7 @@ Listens for keyboard, mouse, and touch events and queues a `flap` action.
 ```js
 InputHandler = {
   pendingFlap: false,
-  bind(canvas),         // attach event listeners
+  bind(canvas),         // attach keydown (spacebar), touchstart (with e.preventDefault() to suppress synthetic click), and click listeners
   consumeFlap(),        // returns true and clears flag if flap pending
 }
 ```
@@ -154,7 +154,7 @@ Renderer = {
   drawBackground(canvas),
   drawGhosty(ghosty),
   drawPipes(pipes, canvas, scoreBarHeight),
-  drawClouds(clouds),
+  drawClouds(clouds),         // draws clouds semi-transparently (globalAlpha = 0.4) — decorative only, no collision
   drawScoreBar(canvas, score, highScore),
   drawIdleScreen(canvas),
   drawGameOverScreen(canvas, score),
@@ -226,7 +226,8 @@ function getScaledConstants(canvas) {
     gravity: 0.5 * scale,
     flapVelocity: -9 * scale,
     scrollSpeed: 3 * scale,
-    gapSize: 160 * scale,
+    gapSize: 180 * scale,        // increased from 160 for more generous mobile gap
+    pipeInterval: 220 * scale,   // scaled by canvas height for consistent pipe frequency
     pipeWidth: 60 * scale,
     ghostyWidth: 48 * scale,
     ghostyHeight: 48 * scale,
@@ -314,9 +315,9 @@ function getScaledConstants(canvas) {
 
 ### Property 10: AABB collision detection correctness
 
-*For any* two axis-aligned rectangles A and B: if they overlap, `aabbOverlap(A, B)` should return `true`; if they do not overlap (separated on any axis), it should return `false`.
+*For any* two axis-aligned rectangles A and B: if they overlap, `aabbOverlap(A, B)` should return `true`; if they do not overlap (separated on any axis), it should return `false`. Cloud objects are excluded from collision checks — only pipes and boundaries trigger game over.
 
-**Validates: Requirements 6.1, 6.2, 6.4**
+**Validates: Requirements 6.1, 6.3, 6.4**
 
 ---
 
@@ -398,7 +399,8 @@ function getScaledConstants(canvas) {
 
 ### Input Event Deduplication
 
-- `Input_Handler` uses a single `pendingFlap` boolean consumed once per frame, preventing multiple flaps from a single interaction event burst (e.g., simultaneous touchstart + click on mobile).
+- `Input_Handler` uses a single `pendingFlap` boolean consumed once per frame, preventing multiple flaps from a single interaction event burst.
+- On touch devices, the `touchstart` handler calls `e.preventDefault()` to suppress the synthetic `click` event that browsers fire after a touch. This prevents the double-flap bug where both `touchstart` and `click` fire for the same tap.
 
 ---
 
