@@ -50,15 +50,15 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    // Firebase web config — public by design for browser apps.
-    // Restrict this key to your domain in Google Cloud Console → APIs & Services → Credentials.
+    // Firebase config injected at deploy time by GitHub Actions.
+    // See .github/workflows/deploy.yml — values come from repository secrets.
     const firebaseConfig = {
-      apiKey: "AIzaSyDjQFPL5dBKFEMlBlEUMO1jedD1Dquq5sc",
-      authDomain: "flappykiro.firebaseapp.com",
-      projectId: "flappykiro",
-      storageBucket: "flappykiro.firebasestorage.app",
-      messagingSenderId: "684495868635",
-      appId: "1:684495868635:web:dfe59a96a4cdbddd3c32fe",
+      apiKey: "%%FIREBASE_API_KEY%%",
+      authDomain: "%%FIREBASE_AUTH_DOMAIN%%",
+      projectId: "%%FIREBASE_PROJECT_ID%%",
+      storageBucket: "%%FIREBASE_STORAGE_BUCKET%%",
+      messagingSenderId: "%%FIREBASE_MESSAGING_SENDER_ID%%",
+      appId: "%%FIREBASE_APP_ID%%",
     };
   </script>
 </head>
