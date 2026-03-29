@@ -50,6 +50,14 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-analytics-compat.js"></script>
+  <!-- Google Analytics 4 (direct gtag — works independently of Firebase init) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=%%FIREBASE_MEASUREMENT_ID%%"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', '%%FIREBASE_MEASUREMENT_ID%%');
+  </script>
   <script>
     // Firebase config injected at deploy time by GitHub Actions.
     // See .github/workflows/deploy.yml — values come from repository secrets.
@@ -278,8 +286,8 @@
           if (typeof window.firebase === 'undefined' || typeof firebaseConfig === 'undefined') return;
           firebase.initializeApp(firebaseConfig);
           this.db = firebase.firestore();
-          // Initialize Analytics if measurementId is present
-          if (firebaseConfig.measurementId) {
+          // Initialize Analytics if measurementId is present and injected
+          if (firebaseConfig.measurementId && !firebaseConfig.measurementId.startsWith('%%')) {
             firebase.analytics();
           }
         } catch (e) {
@@ -338,8 +346,8 @@
     const Analytics = {
       log(eventName, params = {}) {
         try {
-          if (typeof window.firebase !== 'undefined' && firebase.analytics) {
-            firebase.analytics().logEvent(eventName, params);
+          if (typeof gtag === 'function') {
+            gtag('event', eventName, params);
           }
         } catch(e) { /* silent */ }
       },
